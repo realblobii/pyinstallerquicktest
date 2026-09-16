@@ -5,6 +5,7 @@ import threading
 import io
 import requests
 import musicbrainzngs
+import concurrent.futures
 from yt_dlp import YoutubeDL
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, APIC, error
 from mutagen.mp3 import MP3
@@ -14,7 +15,7 @@ from tkinter import messagebox
 from PIL import Image
 
 # Setup MusicBrainz user agent
-musicbrainzngs.set_useragent("MusicBrowserGUI", "1.0", "realblobii [at] proton [dot] me")
+musicbrainzngs.set_useragent("MusicBrowserGUI", "2.0", "realblobii [at] proton [dot] me")
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -22,15 +23,15 @@ ctk.set_default_color_theme("blue")
 class DownloadProgressPopup(ctk.CTkToplevel):
     def __init__(self, parent, title="Downloading"):
         super().__init__(parent)
-        self.geometry("400x180")
+        self.geometry("450x180")
         self.title(title)
         self.resizable(False, False)
         self.grab_set()
 
-        self.label = ctk.CTkLabel(self, text="Preparing download...", font=("Helvetica", 13))
-        self.label.pack(pady=20)
+        self.label = ctk.CTkLabel(self, text="Preparing parallel downloads...", font=("Helvetica", 13))
+        self.label.pack(pady=20, padx=10)
 
-        self.progress_bar = ctk.CTkProgressBar(self, width=320)
+        self.progress_bar = ctk.CTkProgressBar(self, width=380)
         self.progress_bar.set(0)
         self.progress_bar.pack(pady=10)
 
@@ -45,78 +46,77 @@ class DownloadProgressPopup(ctk.CTkToplevel):
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("MusicBrainz Interactive Explorer & Downloader")
+        self.title("musicDL")
         self.geometry("950x720")
 
-        # Tabview container for Albums, Songs, Artists
-        self.tab_view = ctk.CTkTabview(self, width=910, height=660)
-        self.tab_view.pack(padx=20, pady=20, fill="both", expand=True)
-
-        self.tab_albums = self.tab_view.add("Albums")
-        self.tab_songs = self.tab_view.add("Songs")
+        self.search_mode = ctk.StringVar(value="album")
         
-        # Setup individual tabs with optional artist fields
-        self.setup_album_tab(self.tab_albums)
-        self.setup_song_tab(self.tab_songs)
+        self.setup_ui()
 
-    def setup_album_tab(self, tab_frame):
-        input_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
-        input_frame.pack(fill="x", padx=10, pady=10)
+    def setup_ui(self):
+        # Top Container for Spotlight UI
+        top_frame = ctk.CTkFrame(self, fg_color="transparent")
+        top_frame.pack(fill="x", padx=40, pady=(30, 10))
 
-        artist_entry = ctk.CTkEntry(input_frame, placeholder_text="Optional Artist Name...", width=250, height=40)
-        artist_entry.pack(side="left", padx=(0, 10))
-
-        album_entry = ctk.CTkEntry(input_frame, placeholder_text="Album Name...", width=400, height=40)
-        album_entry.pack(side="left", padx=(0, 10))
-
-        results_scroll = ctk.CTkScrollableFrame(tab_frame, width=880, height=480)
-        results_scroll.pack(padx=10, pady=10, fill="both", expand=True)
-
-        album_entry.bind("<Return>", lambda event: self.perform_search("album", album_entry, results_scroll, artist_entry))
+        # Radio Buttons for Mode Selection
+        mode_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        mode_frame.pack(anchor="center", pady=(0, 10))
         
-        btn = ctk.CTkButton(input_frame, text="Search", width=120, height=40, 
-                            command=lambda: self.perform_search("album", album_entry, results_scroll, artist_entry))
-        btn.pack(side="left")
-
-    def setup_song_tab(self, tab_frame):
-        input_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
-        input_frame.pack(fill="x", padx=10, pady=10)
-
-        artist_entry = ctk.CTkEntry(input_frame, placeholder_text="Optional Artist Name...", width=250, height=40)
-        artist_entry.pack(side="left", padx=(0, 10))
-
-        song_entry = ctk.CTkEntry(input_frame, placeholder_text="Song Name...", width=400, height=40)
-        song_entry.pack(side="left", padx=(0, 10))
-
-        results_scroll = ctk.CTkScrollableFrame(tab_frame, width=880, height=480)
-        results_scroll.pack(padx=10, pady=10, fill="both", expand=True)
-
-        song_entry.bind("<Return>", lambda event: self.perform_search("song", song_entry, results_scroll, artist_entry))
+        rb_album = ctk.CTkRadioButton(mode_frame, text="Search Albums", variable=self.search_mode, value="album", font=("Helvetica", 14))
+        rb_album.pack(side="left", padx=15)
         
-        btn = ctk.CTkButton(input_frame, text="Search", width=120, height=40, 
-                            command=lambda: self.perform_search("song", song_entry, results_scroll, artist_entry))
-        btn.pack(side="left")
+        rb_song = ctk.CTkRadioButton(mode_frame, text="Search Songs", variable=self.search_mode, value="song", font=("Helvetica", 14))
+        rb_song.pack(side="left", padx=15)
 
+        # Main Search Bar Setup
+        search_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        search_frame.pack(anchor="center", fill="x", expand=True)
 
-    def perform_search(self, mode, entry_widget, results_scroll, artist_entry_widget=None):
-        query = entry_widget.get().strip()
-        optional_artist = artist_entry_widget.get().strip() if artist_entry_widget else ""
+        self.artist_entry = ctk.CTkEntry(search_frame, placeholder_text="Artist (Optional)", width=200, height=50, font=("Helvetica", 16))
+        self.artist_entry.pack(side="left", padx=(0, 10))
+
+        # Spotlight style large entry
+        self.query_entry = ctk.CTkEntry(search_frame, placeholder_text="What are you looking for?", height=50, font=("Helvetica", 24, "normal"))
+        self.query_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.query_entry.bind("<Return>", lambda event: self.perform_search())
+
+        # Action Buttons
+        btn_search = ctk.CTkButton(search_frame, text="Search", width=100, height=50, font=("Helvetica", 16, "bold"), command=self.perform_search)
+        btn_search.pack(side="left", padx=(0, 10))
+
+        btn_clear = ctk.CTkButton(search_frame, text="✕", width=50, height=50, fg_color="gray40", hover_color="gray30", font=("Helvetica", 18, "bold"), command=self.clear_ui)
+        btn_clear.pack(side="left")
+
+        # Results Scrollable Frame
+        self.results_scroll = ctk.CTkScrollableFrame(self, width=880, height=500)
+        self.results_scroll.pack(padx=20, pady=(10, 20), fill="both", expand=True)
+
+    def clear_ui(self):
+        self.artist_entry.delete(0, 'end')
+        self.query_entry.delete(0, 'end')
+        for widget in self.results_scroll.winfo_children():
+            widget.destroy()
+
+    def perform_search(self):
+        mode = self.search_mode.get()
+        query = self.query_entry.get().strip()
+        optional_artist = self.artist_entry.get().strip()
 
         if not query:
-            messagebox.showerror("Error", f"Please enter a query to search!")
+            messagebox.showerror("Error", "Please enter a query to search!")
             return
 
         # Clear previous cards & show responsive loading state
-        for widget in results_scroll.winfo_children():
+        for widget in self.results_scroll.winfo_children():
             widget.destroy()
 
-        loading_label = ctk.CTkLabel(results_scroll, text="⏳ Searching MusicBrainz database...", font=("Helvetica", 14, "italic"))
-        loading_label.pack(pady=40)
+        loading_label = ctk.CTkLabel(self.results_scroll, text="⏳ Searching MusicBrainz database...", font=("Helvetica", 16, "italic"))
+        loading_label.pack(pady=60)
 
         # Run lookup in background thread
-        threading.Thread(target=self.fetch_results_thread, args=(mode, query, optional_artist, results_scroll, loading_label), daemon=True).start()
+        threading.Thread(target=self.fetch_results_thread, args=(mode, query, optional_artist, loading_label), daemon=True).start()
 
-    def fetch_results_thread(self, mode, query, optional_artist, results_scroll, loading_label):
+    def fetch_results_thread(self, mode, query, optional_artist, loading_label):
         try:
             items = []
             if mode == "album":
@@ -136,7 +136,7 @@ class App(ctk.CTk):
             self.after(0, loading_label.destroy)
 
             if not items:
-                self.after(0, lambda: ctk.CTkLabel(results_scroll, text="No matches found.", font=("Helvetica", 12)).pack(pady=20))
+                self.after(0, lambda: ctk.CTkLabel(self.results_scroll, text="No matches found.", font=("Helvetica", 14)).pack(pady=40))
                 return
 
             for item in items:
@@ -144,19 +144,19 @@ class App(ctk.CTk):
                     title = item.get('title', 'Unknown Album')
                     artist = item['artist-credit'][0]['artist']['name'] if 'artist-credit' in item else "Unknown Artist"
                     release_id = item['id']
-                    self.load_album_card_data(results_scroll, artist, title, release_id)
+                    self.load_album_card_data(artist, title, release_id)
                 elif mode == "song":
                     title = item.get('title', 'Unknown Song')
                     artist = item['artist-credit'][0]['artist']['name'] if 'artist-credit' in item else "Unknown Artist"
                     album_title = item['release-list'][0].get('title', 'Single / Various') if 'release-list' in item and item['release-list'] else "Single"
                     release_id = item['release-list'][0].get('id') if 'release-list' in item and item['release-list'] else None
-                    self.load_song_card_data(results_scroll, artist, album_title, title, release_id)
+                    self.load_song_card_data(artist, album_title, title, release_id)
 
         except Exception as e:
             self.after(0, loading_label.destroy)
             print(f"Search error ({mode}): {e}")
 
-    def load_album_card_data(self, results_scroll, artist, album, release_id):
+    def load_album_card_data(self, artist, album, release_id):
         tracks, cover_data = [], None
         try:
             details = musicbrainzngs.get_release_by_id(release_id, includes=["recordings"])
@@ -171,9 +171,9 @@ class App(ctk.CTk):
         except Exception:
             pass
 
-        self.after(0, lambda: self.render_card(results_scroll, artist, album, tracks, cover_data))
+        self.after(0, lambda: self.render_card(artist, album, tracks, cover_data))
 
-    def load_song_card_data(self, results_scroll, artist, album, song_title, release_id):
+    def load_song_card_data(self, artist, album, song_title, release_id):
         cover_data = None
         if release_id:
             try:
@@ -183,19 +183,17 @@ class App(ctk.CTk):
                     cover_data = resp.content
             except Exception:
                 pass
-        self.after(0, lambda: self.render_card(results_scroll, artist, album, [song_title], cover_data, specific_song=song_title))
+        self.after(0, lambda: self.render_card(artist, album, [song_title], cover_data, specific_song=song_title))
 
-   
+    def render_card(self, artist, album_or_context, tracks, cover_data, specific_song=None):
+        card = ctk.CTkFrame(self.results_scroll, fg_color=("gray90", "gray15"))
+        card.pack(fill="x", pady=8, padx=10)
 
-    def render_card(self, results_scroll, artist, album_or_context, tracks, cover_data, is_artist=False, specific_song=None, disambig=""):
-        card = ctk.CTkFrame(results_scroll, fg_color=("gray90", "gray15"))
-        card.pack(fill="x", pady=6, padx=5)
-
-        img_label = ctk.CTkLabel(card, text="No Image", width=80, height=80)
+        img_label = ctk.CTkLabel(card, text="No Image", width=90, height=90, fg_color="gray25", corner_radius=8)
         if cover_data:
             try:
-                pil_img = Image.open(io.BytesIO(cover_data)).resize((80, 80))
-                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(80, 80))
+                pil_img = Image.open(io.BytesIO(cover_data)).resize((90, 90))
+                ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(90, 90))
                 img_label.configure(image=ctk_img, text="")
                 img_label.image = ctk_img
             except Exception:
@@ -203,29 +201,22 @@ class App(ctk.CTk):
         img_label.pack(side="left", padx=10, pady=10)
 
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
-        info_frame.pack(side="left", fill="both", expand=True, padx=5, pady=10)
+        info_frame.pack(side="left", fill="both", expand=True, padx=10, pady=10)
 
-        if is_artist:
-            subtext = f"Info: {disambig}" if disambig else "Artist Profile"
-            ctk.CTkLabel(info_frame, text=f"Artist: {artist}", font=("Helvetica", 15, "bold")).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text=subtext, font=("Helvetica", 12)).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text=f"Top Album Tracks Available: {len(tracks)}", font=("Helvetica", 11, "italic")).pack(anchor="w")
-            download_title = f"{artist} Top Tracks"
-        elif specific_song:
-            ctk.CTkLabel(info_frame, text=f"Song: {specific_song}", font=("Helvetica", 15, "bold")).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text=f"Artist: {artist} | Album: {album_or_context}", font=("Helvetica", 12)).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text="Single Track Download", font=("Helvetica", 11, "italic")).pack(anchor="w")
+        if specific_song:
+            ctk.CTkLabel(info_frame, text=specific_song, font=("Helvetica", 18, "bold")).pack(anchor="w")
+            ctk.CTkLabel(info_frame, text=f"{artist} • {album_or_context}", font=("Helvetica", 14)).pack(anchor="w", pady=(2, 0))
             download_title = specific_song
         else:
-            ctk.CTkLabel(info_frame, text=f"Album: {album_or_context}", font=("Helvetica", 15, "bold")).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text=f"Artist: {artist}", font=("Helvetica", 12)).pack(anchor="w")
-            ctk.CTkLabel(info_frame, text=f"Song Count: {len(tracks)} tracks", font=("Helvetica", 11, "italic")).pack(anchor="w")
+            ctk.CTkLabel(info_frame, text=album_or_context, font=("Helvetica", 18, "bold")).pack(anchor="w")
+            ctk.CTkLabel(info_frame, text=f"{artist}", font=("Helvetica", 14)).pack(anchor="w", pady=(2, 0))
+            ctk.CTkLabel(info_frame, text=f"{len(tracks)} tracks", font=("Helvetica", 12, "italic")).pack(anchor="w")
             download_title = album_or_context
 
-        btn_text = "⬇ Download" if not is_artist else "⬇ Get Top Tracks"
-        download_btn = ctk.CTkButton(card, text=btn_text, width=120, height=40, fg_color="green", hover_color="darkgreen",
+        download_btn = ctk.CTkButton(card, text="⬇ Download", width=130, height=45, font=("Helvetica", 14, "bold"), 
+                                     fg_color="#2b8a3e", hover_color="#237032",
                                      command=lambda: self.start_download_task(artist, download_title, tracks, cover_data))
-        download_btn.pack(side="right", padx=15)
+        download_btn.pack(side="right", padx=20)
 
     def start_download_task(self, artist, album_or_title, tracks, cover_data):
         if not tracks:
@@ -235,9 +226,11 @@ class App(ctk.CTk):
         popup = DownloadProgressPopup(self, title=f"Downloading: {album_or_title}")
         
         def download_worker():
-            output_dir = f"{artist} - {album_or_title}"
+            output_dir = f"{artist} - {album_or_title}".replace("/", "_").replace("\\", "_")
             os.makedirs(output_dir, exist_ok=True)
             total_tracks = len(tracks)
+            completed_tracks = 0
+            lock = threading.Lock()
             
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -245,21 +238,22 @@ class App(ctk.CTk):
                 'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
                 'quiet': True,
                 'no_warnings': True,
+                'noprogress': True,
             }
 
-            for idx, track_title in enumerate(tracks, start=1):
-                percent = ((idx - 1) / total_tracks) * 100
-                popup.after(0, lambda p=percent, i=idx, t=track_title: popup.update_progress(p, f"({i}/{total_tracks}) Downloading: {t}"))
-                
+            def download_track(track_title):
+                nonlocal completed_tracks
                 query = f"ytsearch1:{artist} - {track_title} audio"
                 try:
                     with YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(query, download=True)
-                        video_info = info['entries'][0] if 'entries' in info else info
+                        if not info or 'entries' not in info or not info['entries']: return
+                        video_info = info['entries'][0]
                         filename = ydl.prepare_filename(video_info)
                         base, _ = os.path.splitext(filename)
                         mp3_filename = f"{base}.mp3"
                         
+                        # ID3 Tagging
                         if os.path.exists(mp3_filename):
                             audio = MP3(mp3_filename, ID3=ID3)
                             try:
@@ -274,9 +268,20 @@ class App(ctk.CTk):
                             audio.save(v2_version=3)
                 except Exception as e:
                     print(f"Failed track {track_title}: {e}")
+                finally:
+                    with lock:
+                        completed_tracks += 1
+                        percent = (completed_tracks / total_tracks) * 100
+                        popup.after(0, lambda p=percent, t=track_title, c=completed_tracks: 
+                                    popup.update_progress(p, f"({c}/{total_tracks}) Finished: {t}"))
+
+            # Use ThreadPoolExecutor to download 4 tracks at a time
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(download_track, title) for title in tracks]
+                concurrent.futures.wait(futures)
 
             popup.after(0, lambda: popup.update_progress(100.0, "Download complete!"))
-            popup.after(800, popup.destroy)
+            popup.after(1000, popup.destroy)
             self.after(0, lambda: messagebox.showinfo("Success", f"Finished downloading items for '{album_or_title}'!"))
 
         threading.Thread(target=download_worker, daemon=True).start()
