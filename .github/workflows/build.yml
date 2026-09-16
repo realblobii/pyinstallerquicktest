@@ -17,7 +17,7 @@ jobs:
       run: pip install pyinstaller
       
     - name: Build Exe
-      run: pyinstaller --onefile your_script.py
+      run: pyinstaller --onefile md.py
       
     - name: Upload Result
       uses: actions/upload-artifact@v4
