@@ -17,10 +17,10 @@ jobs:
       run: pip install pyinstaller
       
     - name: Build Exe
-      run: pyinstaller --onefile md.py
+      run: pyinstaller --onefile --name="MusicDownloader" md.py
       
     - name: Upload Result
       uses: actions/upload-artifact@v4
       with:
         name: windows-executable
-        path: dist/your_script.exe
+        path: dist/MusicDownloader.exe
