@@ -14,7 +14,7 @@ from tkinter import messagebox
 from PIL import Image
 
 # Setup MusicBrainz user agent
-musicbrainzngs.set_useragent("MusicBrowserGUI", "1.0", "your_email@example.com")
+musicbrainzngs.set_useragent("MusicBrowserGUI", "1.0", "realblobii [at] proton [dot] me")
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
@@ -54,12 +54,10 @@ class App(ctk.CTk):
 
         self.tab_albums = self.tab_view.add("Albums")
         self.tab_songs = self.tab_view.add("Songs")
-        self.tab_artists = self.tab_view.add("Artists")
-
+        
         # Setup individual tabs with optional artist fields
         self.setup_album_tab(self.tab_albums)
         self.setup_song_tab(self.tab_songs)
-        self.setup_artist_tab(self.tab_artists)
 
     def setup_album_tab(self, tab_frame):
         input_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
@@ -99,21 +97,6 @@ class App(ctk.CTk):
                             command=lambda: self.perform_search("song", song_entry, results_scroll, artist_entry))
         btn.pack(side="left")
 
-    def setup_artist_tab(self, tab_frame):
-        input_frame = ctk.CTkFrame(tab_frame, fg_color="transparent")
-        input_frame.pack(fill="x", padx=10, pady=10)
-
-        artist_entry = ctk.CTkEntry(input_frame, placeholder_text="Artist Name...", width=660, height=40)
-        artist_entry.pack(side="left", padx=(0, 10))
-
-        results_scroll = ctk.CTkScrollableFrame(tab_frame, width=880, height=480)
-        results_scroll.pack(padx=10, pady=10, fill="both", expand=True)
-
-        artist_entry.bind("<Return>", lambda event: self.perform_search("artist", artist_entry, results_scroll))
-        
-        btn = ctk.CTkButton(input_frame, text="Search", width=120, height=40, 
-                            command=lambda: self.perform_search("artist", artist_entry, results_scroll))
-        btn.pack(side="left")
 
     def perform_search(self, mode, entry_widget, results_scroll, artist_entry_widget=None):
         query = entry_widget.get().strip()
@@ -148,9 +131,6 @@ class App(ctk.CTk):
                 else:
                     res = musicbrainzngs.search_recordings(recording=query, limit=10)
                 items = res.get('recording-list', [])
-            elif mode == "artist":
-                res = musicbrainzngs.search_artists(artist=query, limit=10)
-                items = res.get('artist-list', [])
 
             # Clear loading message safely on main thread
             self.after(0, loading_label.destroy)
@@ -171,11 +151,6 @@ class App(ctk.CTk):
                     album_title = item['release-list'][0].get('title', 'Single / Various') if 'release-list' in item and item['release-list'] else "Single"
                     release_id = item['release-list'][0].get('id') if 'release-list' in item and item['release-list'] else None
                     self.load_song_card_data(results_scroll, artist, album_title, title, release_id)
-                elif mode == "artist":
-                    artist_name = item.get('name', 'Unknown Artist')
-                    artist_id = item['id']
-                    disambig = item.get('disambiguation', '')
-                    self.load_artist_card_data(results_scroll, artist_name, artist_id, disambig)
 
         except Exception as e:
             self.after(0, loading_label.destroy)
@@ -210,23 +185,7 @@ class App(ctk.CTk):
                 pass
         self.after(0, lambda: self.render_card(results_scroll, artist, album, [song_title], cover_data, specific_song=song_title))
 
-    def load_artist_card_data(self, results_scroll, artist_name, artist_id, disambig):
-        cover_data, tracks, album_title = None, [], "Top Artist Releases"
-        try:
-            releases = musicbrainzngs.browse_releases(artist=artist_id, release_type=["album"], limit=1)
-            if releases['release-list']:
-                rel = releases['release-list'][0]
-                album_title = rel['title']
-                release_id = rel['id']
-                details = musicbrainzngs.get_release_by_id(release_id, includes=["recordings"])
-                tracks = [t['recording']['title'] for m in details['release']['medium-list'] for t in m['track-list']]
-                art_url = f"https://coverartarchive.org/release/{release_id}/front"
-                resp = requests.get(art_url, timeout=4)
-                if resp.status_code == 200:
-                    cover_data = resp.content
-        except Exception:
-            pass
-        self.after(0, lambda: self.render_card(results_scroll, artist_name, album_title, tracks, cover_data, is_artist=True, disambig=disambig))
+   
 
     def render_card(self, results_scroll, artist, album_or_context, tracks, cover_data, is_artist=False, specific_song=None, disambig=""):
         card = ctk.CTkFrame(results_scroll, fg_color=("gray90", "gray15"))
