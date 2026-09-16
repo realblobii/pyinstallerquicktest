@@ -1,0 +1,26 @@
+name: Build Windows Exe
+on: 
+  workflow_dispatch: # Allows you to manually trigger this build from the GitHub UI
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install PyInstaller
+      run: pip install pyinstaller
+      
+    - name: Build Exe
+      run: pyinstaller --onefile your_script.py
+      
+    - name: Upload Result
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-executable
+        path: dist/your_script.exe
